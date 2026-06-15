@@ -3,12 +3,26 @@ import glob
 import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import numpy as np
 
 # ---------------------------------------------------
-# 1. LOAD FILES
+# 1. ROUTE INPUT + FOLDER SELECTION
 # ---------------------------------------------------
-files = glob.glob("raw_data/0608_R31/*.csv")
+route = input("Enter route (e.g. R31): ").upper()
 
+matching_folders = glob.glob(f"raw_data/*_{route}")
+
+if len(matching_folders) == 0:
+    raise ValueError(f"No folder found for route {route}")
+
+folder = matching_folders[0]
+print("Using folder:", folder)
+
+files = glob.glob(os.path.join(folder, "*.csv"))
+
+# ---------------------------------------------------
+# 2. LOAD DATA
+# ---------------------------------------------------
 dfs = []
 
 for f in files:
@@ -25,15 +39,13 @@ for f in files:
         continue
 
     df["person"] = parts[2]
-    df["trial"] = parts[3]
-
     dfs.append(df)
 
 data = pd.concat(dfs, ignore_index=True)
 data.columns = [c.strip() for c in data.columns]
 
 # ---------------------------------------------------
-# 2. FIND COLUMNS
+# 3. FIND COLUMNS
 # ---------------------------------------------------
 def find_col(df, keywords):
     best, best_score = None, 0
@@ -53,19 +65,22 @@ humidity_col = find_col(data, ["humid"])
 dew_col = find_col(data, ["dew"])
 
 # ---------------------------------------------------
-# 3. CLEAN NUMBERS
+# 4. CLEAN NUMBERS
 # ---------------------------------------------------
 def extract_numeric(series):
-    return series.astype(str).str.extract(r"([-+]?\d*\.?\d+)")[0].astype(float)
+    return (
+        series.astype(str)
+        .str.extract(r"([-+]?\d*\.?\d+)")[0]
+        .astype(float)
+    )
 
 for col in [temp_col, light_col, heat_col, humidity_col, dew_col]:
     if col:
         data[col] = extract_numeric(data[col])
 
 # ---------------------------------------------------
-# 4. BUILD REAL TIME (CRITICAL FIX)
+# 5. CREATE DATETIME
 # ---------------------------------------------------
-# PocketLab usually has Date + Time columns
 if "Date" in data.columns and "Time" in data.columns:
 
     data["datetime"] = pd.to_datetime(
@@ -74,79 +89,167 @@ if "Date" in data.columns and "Time" in data.columns:
     )
 
 else:
-    # fallback if missing
     data["datetime"] = pd.to_datetime(data[time_col], errors="coerce")
 
-# remove bad timestamps only
 data = data.dropna(subset=["datetime", "person"])
-
-# IMPORTANT: sort time
 data = data.sort_values("datetime")
 
 # ---------------------------------------------------
-# 5. PEOPLE LIST
+# 6. AM / PM SPLIT (1:30 PM FIXED)
+# ---------------------------------------------------
+data["hour_decimal"] = (
+    data["datetime"].dt.hour +
+    data["datetime"].dt.minute / 60
+)
+
+LUNCH_SPLIT = 13.5
+
+data["period"] = np.where(
+    data["hour_decimal"] < LUNCH_SPLIT,
+    "AM",
+    "PM"
+)
+
+# ---------------------------------------------------
+# 7. OUTLIER REMOVAL (±3 STD)
+# ---------------------------------------------------
+variables = [temp_col, light_col, heat_col, humidity_col, dew_col]
+
+for person in data["person"].unique():
+
+    mask = data["person"] == person
+
+    for col in variables:
+
+        if col is None:
+            continue
+
+        mean = data.loc[mask, col].mean()
+        sd = data.loc[mask, col].std()
+
+        upper = mean + 3 * sd
+        lower = mean - 3 * sd
+
+        outliers = mask & (
+            (data[col] > upper) | (data[col] < lower)
+        )
+
+        data.loc[outliers, col] = np.nan
+
+# ---------------------------------------------------
+# 8. GAP BREAK FUNCTION (FIXED)
+# ---------------------------------------------------
+def break_gaps(df, time_col, value_col, threshold_minutes=20):
+
+    df = df.sort_values(time_col).copy()
+
+    diff = df[time_col].diff()
+
+    threshold = pd.Timedelta(minutes=threshold_minutes)
+
+    gap = diff > threshold
+
+    df.loc[gap, value_col] = np.nan
+
+    return df
+
+# ---------------------------------------------------
+# 9. COLORS
 # ---------------------------------------------------
 people = sorted(data["person"].unique())
 
+colors = {
+    "KH": "#1f77b4",
+    "PU": "#d62728",
+    "CC": "#2ca02c"
+}
+
+default_color = "black"
+
 # ---------------------------------------------------
-# 6. MULTI-PANEL FIGURE (REAL TIME AXIS)
+# 10. PLOT SETUP
 # ---------------------------------------------------
-fig, axes = plt.subplots(5, 1, figsize=(12, 18), sharex=True)
+fig, axes = plt.subplots(
+    5,
+    2,
+    figsize=(18, 18),
+    sharex=False
+)
 
 plots = [
-    (temp_col, "Temperature Probe"),
-    (light_col, "Ambient Light"),
-    (heat_col, "Heat Index"),
-    (humidity_col, "Humidity"),
-    (dew_col, "Dew Point")
+    (temp_col, "Temperature (°C)"),
+    (light_col, "Ambient Light (lux)"),
+    (heat_col, "Heat Index (°C)"),
+    (humidity_col, "Humidity (%)"),
+    (dew_col, "Dew Point (°C)")
 ]
 
-for ax, (col, title) in zip(axes, plots):
+# ---------------------------------------------------
+# 11. PLOTTING
+# ---------------------------------------------------
+for row, (col, title) in enumerate(plots):
 
     if col is None:
-        ax.set_title(f"{title} (NOT FOUND)")
         continue
 
-    for p in people:
-        subset = data[data["person"] == p]
+    for col_idx, period in enumerate(["AM", "PM"]):
 
-        ax.plot(
-            subset["datetime"],
-            subset[col],
-            label=p,
-            linewidth=1
+        ax = axes[row, col_idx]
+
+        subset_period = data[data["period"] == period]
+
+        for person in people:
+
+            subset = subset_period[
+                subset_period["person"] == person
+            ].copy()
+
+            # break fake continuous lines
+            subset = break_gaps(subset, "datetime", col)
+
+            ax.plot(
+                subset["datetime"],
+                subset[col],
+                label=person,
+                linewidth=1.5,
+                color=colors.get(person, default_color)
+            )
+
+        ax.set_title(f"{title} ({period})", fontsize=10)
+        ax.set_ylabel(title, fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+        ax.xaxis.set_major_formatter(
+            mdates.DateFormatter("%H:%M")
         )
 
-    ax.set_title(title)
-    ax.set_ylabel(title)
-    ax.grid(True)
+        ax.tick_params(axis="x", rotation=45, labelsize=8)
+        ax.tick_params(axis="y", labelsize=8)
 
 # ---------------------------------------------------
-# 7. TIME AXIS FORMATTING (SHOW BREAKS + REAL TIME)
+# 12. LEGEND
 # ---------------------------------------------------
-axes[-1].set_xlabel("Time of Day")
+handles, labels = axes[0, 0].get_legend_handles_labels()
 
-locator = mdates.AutoDateLocator()
-formatter = mdates.DateFormatter("%H:%M")
-
-axes[-1].xaxis.set_major_locator(locator)
-axes[-1].xaxis.set_major_formatter(formatter)
-
-fig.autofmt_xdate()
-
-# ---------------------------------------------------
-# 8. SINGLE LEGEND (NO DUPLICATION)
-# ---------------------------------------------------
-handles, labels = axes[0].get_legend_handles_labels()
-fig.legend(handles, labels, title="Person", loc="upper right")
+fig.legend(
+    handles,
+    labels,
+    title="Person",
+    loc="upper right",
+    fontsize=9
+)
 
 # ---------------------------------------------------
-# 9. SAVE
+# 13. SAVE OUTPUT
 # ---------------------------------------------------
 os.makedirs("outputs", exist_ok=True)
 
 plt.tight_layout()
-plt.savefig("outputs/0608_R31_multiplot_time_correct.png",
-            dpi=300, bbox_inches="tight")
+
+plt.savefig(
+    f"outputs/{route}_AM_PM_multiplot.png",
+    dpi=300,
+    bbox_inches="tight"
+)
 
 plt.show()
