@@ -1,0 +1,35 @@
+---
+title: "EDA"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+
+R31_kestrel <- read_csv("raw_data/0608_R31_HL_Kestrel_AM.csv", skip=3)
+
+head(R31_kestrel)
+
+R31_kestrel <- R31_kestrel[-1, ]
+
+R31_kestrel$Temperature <- as.numeric(R31_kestrel$Temperature)
+
+R31_kestrel$`FORMATTED DATE_TIME` <-
+  as.POSIXct(R31_kestrel$`FORMATTED DATE_TIME`)
+```
+
+```{r}
+
+ggplot(R31_kestrel, aes(x = `FORMATTED DATE_TIME`, y = Temperature)) +
+  geom_line() +
+  scale_x_datetime(
+    date_breaks = "15 min",
+    date_labels = "%H:%M"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
