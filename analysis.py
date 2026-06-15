@@ -6,7 +6,7 @@ import matplotlib.dates as mdates
 import numpy as np
 
 # ---------------------------------------------------
-# 1. SELECT ROUTE + LOAD FOLDER
+# 1. ROUTE INPUT + FOLDER SELECTION
 # ---------------------------------------------------
 route = input("Enter route (e.g. R31): ").upper()
 
@@ -20,11 +20,11 @@ print("Using folder:", folder)
 
 files = glob.glob(os.path.join(folder, "*.csv"))
 
+# ---------------------------------------------------
+# 2. LOAD DATA
+# ---------------------------------------------------
 dfs = []
 
-# ---------------------------------------------------
-# 2. LOAD FILES (IGNORE NON-TRIAL FILES)
-# ---------------------------------------------------
 for f in files:
 
     name = os.path.basename(f)
@@ -39,14 +39,13 @@ for f in files:
         continue
 
     df["person"] = parts[2]
-
     dfs.append(df)
 
 data = pd.concat(dfs, ignore_index=True)
 data.columns = [c.strip() for c in data.columns]
 
 # ---------------------------------------------------
-# 3. FIND COLUMNS ROBUSTLY
+# 3. FIND COLUMNS
 # ---------------------------------------------------
 def find_col(df, keywords):
     best, best_score = None, 0
@@ -65,11 +64,8 @@ heat_col = find_col(data, ["heat"])
 humidity_col = find_col(data, ["humid"])
 dew_col = find_col(data, ["dew"])
 
-print("\nDetected columns:")
-print(time_col, temp_col, light_col, heat_col, humidity_col, dew_col)
-
 # ---------------------------------------------------
-# 4. CLEAN NUMERIC DATA
+# 4. CLEAN NUMBERS
 # ---------------------------------------------------
 def extract_numeric(series):
     return (
@@ -83,7 +79,7 @@ for col in [temp_col, light_col, heat_col, humidity_col, dew_col]:
         data[col] = extract_numeric(data[col])
 
 # ---------------------------------------------------
-# 5. CREATE REAL DATETIME
+# 5. CREATE DATETIME
 # ---------------------------------------------------
 if "Date" in data.columns and "Time" in data.columns:
 
@@ -99,14 +95,14 @@ data = data.dropna(subset=["datetime", "person"])
 data = data.sort_values("datetime")
 
 # ---------------------------------------------------
-# 6. AM / PM SPLIT (FIXED AT 1:30 PM)
+# 6. AM / PM SPLIT (1:30 PM FIXED)
 # ---------------------------------------------------
 data["hour_decimal"] = (
     data["datetime"].dt.hour +
     data["datetime"].dt.minute / 60
 )
 
-LUNCH_SPLIT = 13.5  # 1:30 PM
+LUNCH_SPLIT = 13.5
 
 data["period"] = np.where(
     data["hour_decimal"] < LUNCH_SPLIT,
@@ -115,7 +111,7 @@ data["period"] = np.where(
 )
 
 # ---------------------------------------------------
-# 7. OUTLIER REMOVAL (±3 STD PER PERSON)
+# 7. OUTLIER REMOVAL (±3 STD)
 # ---------------------------------------------------
 variables = [temp_col, light_col, heat_col, humidity_col, dew_col]
 
@@ -141,20 +137,37 @@ for person in data["person"].unique():
         data.loc[outliers, col] = np.nan
 
 # ---------------------------------------------------
-# 8. PEOPLE + COLORS
+# 8. GAP BREAK FUNCTION (FIXED)
+# ---------------------------------------------------
+def break_gaps(df, time_col, value_col, threshold_minutes=20):
+
+    df = df.sort_values(time_col).copy()
+
+    diff = df[time_col].diff()
+
+    threshold = pd.Timedelta(minutes=threshold_minutes)
+
+    gap = diff > threshold
+
+    df.loc[gap, value_col] = np.nan
+
+    return df
+
+# ---------------------------------------------------
+# 9. COLORS
 # ---------------------------------------------------
 people = sorted(data["person"].unique())
 
 colors = {
-    "KH": "#1f77b4",  # blue
-    "PU": "#d62728",  # red
-    "CC": "#2ca02c"   # green
+    "KH": "#1f77b4",
+    "PU": "#d62728",
+    "CC": "#2ca02c"
 }
 
 default_color = "black"
 
 # ---------------------------------------------------
-# 9. PLOT SETUP (5 x 2 = 10 PLOTS)
+# 10. PLOT SETUP
 # ---------------------------------------------------
 fig, axes = plt.subplots(
     5,
@@ -164,15 +177,15 @@ fig, axes = plt.subplots(
 )
 
 plots = [
-    (temp_col, "Temperature Probe"),
-    (light_col, "Ambient Light"),
-    (heat_col, "Heat Index"),
-    (humidity_col, "Humidity"),
-    (dew_col, "Dew Point")
+    (temp_col, "Temperature (°C)"),
+    (light_col, "Ambient Light (lux)"),
+    (heat_col, "Heat Index (°C)"),
+    (humidity_col, "Humidity (%)"),
+    (dew_col, "Dew Point (°C)")
 ]
 
 # ---------------------------------------------------
-# 10. PLOTTING
+# 11. PLOTTING
 # ---------------------------------------------------
 for row, (col, title) in enumerate(plots):
 
@@ -189,7 +202,10 @@ for row, (col, title) in enumerate(plots):
 
             subset = subset_period[
                 subset_period["person"] == person
-            ]
+            ].copy()
+
+            # break fake continuous lines
+            subset = break_gaps(subset, "datetime", col)
 
             ax.plot(
                 subset["datetime"],
@@ -199,17 +215,19 @@ for row, (col, title) in enumerate(plots):
                 color=colors.get(person, default_color)
             )
 
-        ax.set_title(f"{title} ({period})")
+        ax.set_title(f"{title} ({period})", fontsize=10)
+        ax.set_ylabel(title, fontsize=9)
         ax.grid(True, alpha=0.3)
 
         ax.xaxis.set_major_formatter(
             mdates.DateFormatter("%H:%M")
         )
 
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=8)
+        ax.tick_params(axis="y", labelsize=8)
 
 # ---------------------------------------------------
-# 11. LEGEND (ONCE)
+# 12. LEGEND
 # ---------------------------------------------------
 handles, labels = axes[0, 0].get_legend_handles_labels()
 
@@ -217,11 +235,12 @@ fig.legend(
     handles,
     labels,
     title="Person",
-    loc="upper right"
+    loc="upper right",
+    fontsize=9
 )
 
 # ---------------------------------------------------
-# 12. SAVE OUTPUT
+# 13. SAVE OUTPUT
 # ---------------------------------------------------
 os.makedirs("outputs", exist_ok=True)
 
