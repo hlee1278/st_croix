@@ -20,11 +20,11 @@ print("Using folder:", folder)
 
 files = glob.glob(os.path.join(folder, "*.csv"))
 
+dfs = []
+
 # ---------------------------------------------------
 # 2. LOAD DATA
 # ---------------------------------------------------
-dfs = []
-
 for f in files:
 
     name = os.path.basename(f)
@@ -79,7 +79,7 @@ for col in [temp_col, light_col, heat_col, humidity_col, dew_col]:
         data[col] = extract_numeric(data[col])
 
 # ---------------------------------------------------
-# 5. CREATE DATETIME
+# 5. DATETIME
 # ---------------------------------------------------
 if "Date" in data.columns and "Time" in data.columns:
 
@@ -95,7 +95,7 @@ data = data.dropna(subset=["datetime", "person"])
 data = data.sort_values("datetime")
 
 # ---------------------------------------------------
-# 6. AM / PM SPLIT (1:30 PM FIXED)
+# 6. AM / PM SPLIT
 # ---------------------------------------------------
 data["hour_decimal"] = (
     data["datetime"].dt.hour +
@@ -111,7 +111,7 @@ data["period"] = np.where(
 )
 
 # ---------------------------------------------------
-# 7. OUTLIER REMOVAL (±3 STD)
+# 7. OUTLIERS (±3 STD)
 # ---------------------------------------------------
 variables = [temp_col, light_col, heat_col, humidity_col, dew_col]
 
@@ -137,18 +137,16 @@ for person in data["person"].unique():
         data.loc[outliers, col] = np.nan
 
 # ---------------------------------------------------
-# 8. GAP BREAK FUNCTION (FIXED)
+# 8. GAP BREAKS
 # ---------------------------------------------------
 def break_gaps(df, time_col, value_col, threshold_minutes=20):
 
     df = df.sort_values(time_col).copy()
 
     diff = df[time_col].diff()
-
     threshold = pd.Timedelta(minutes=threshold_minutes)
 
     gap = diff > threshold
-
     df.loc[gap, value_col] = np.nan
 
     return df
@@ -164,17 +162,12 @@ colors = {
     "CC": "#2ca02c"
 }
 
-default_color = "black"
+# ---------------------------------------------------
+# 10. PLOT
+# ---------------------------------------------------
+fig, axes = plt.subplots(5, 2, figsize=(18, 18), sharex=False)
 
-# ---------------------------------------------------
-# 10. PLOT SETUP
-# ---------------------------------------------------
-fig, axes = plt.subplots(
-    5,
-    2,
-    figsize=(18, 18),
-    sharex=False
-)
+fig.subplots_adjust(hspace=0.35, wspace=0.15)
 
 plots = [
     (temp_col, "Temperature (°C)"),
@@ -184,9 +177,6 @@ plots = [
     (dew_col, "Dew Point (°C)")
 ]
 
-# ---------------------------------------------------
-# 11. PLOTTING
-# ---------------------------------------------------
 for row, (col, title) in enumerate(plots):
 
     if col is None:
@@ -200,11 +190,7 @@ for row, (col, title) in enumerate(plots):
 
         for person in people:
 
-            subset = subset_period[
-                subset_period["person"] == person
-            ].copy()
-
-            # break fake continuous lines
+            subset = subset_period[subset_period["person"] == person].copy()
             subset = break_gaps(subset, "datetime", col)
 
             ax.plot(
@@ -212,22 +198,27 @@ for row, (col, title) in enumerate(plots):
                 subset[col],
                 label=person,
                 linewidth=1.5,
-                color=colors.get(person, default_color)
+                color=colors.get(person)
             )
 
-        ax.set_title(f"{title} ({period})", fontsize=10)
-        ax.set_ylabel(title, fontsize=9)
+        # ---------------------------
+        # FORMATTING FIXES
+        # ---------------------------
+        ax.set_title(f"{title} ({period})", fontsize=9)
+
+        ax.set_ylabel(title, fontsize=8)
+
+        ax.tick_params(axis="x", labelsize=7, rotation=45)
+        ax.tick_params(axis="y", labelsize=7)
+
         ax.grid(True, alpha=0.3)
 
         ax.xaxis.set_major_formatter(
             mdates.DateFormatter("%H:%M")
         )
 
-        ax.tick_params(axis="x", rotation=45, labelsize=8)
-        ax.tick_params(axis="y", labelsize=8)
-
 # ---------------------------------------------------
-# 12. LEGEND
+# 11. LEGEND
 # ---------------------------------------------------
 handles, labels = axes[0, 0].get_legend_handles_labels()
 
@@ -236,11 +227,11 @@ fig.legend(
     labels,
     title="Person",
     loc="upper right",
-    fontsize=9
+    fontsize=8
 )
 
 # ---------------------------------------------------
-# 13. SAVE OUTPUT
+# 12. SAVE
 # ---------------------------------------------------
 os.makedirs("outputs", exist_ok=True)
 
