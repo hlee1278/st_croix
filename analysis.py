@@ -105,33 +105,39 @@ for p in data["person"].unique():
 #function that inserts NaN breaks when there is a gap in data
 def build_complete_series(df, person, value_col):
 
-    #filters table to a copy of the person's rows
+    #filters to a copy of a person's rows
     sub = df[df["person"] == person].copy()
 
-    #sorts by time and sets datetime as index
+    #sorts rows by time and replaces row numbers with datetime values as index
     sub = sub.sort_values("datetime").set_index("datetime")
 
     if len(sub) < 2:
         return sub
 
-    #calculate time difference between every consecutive row
+    #calculate time difference between every row
     diffs = sub.index.to_series().diff().dropna()
-    diffs_pos = diffs[diffs > pd.Timedelta(0)]
-    dt = diffs_pos.mode()[0]
-    gap_threshold = dt * 1.5
+    
+    #keep gaps that are longer than 1.5 seconds
+    gap_threshold = pd.Timedelta(seconds=1.5)  # hardcoded since we know rate is 1/sec
 
+    #marks if gaps are outside of threshold
     gap_mask = diffs > gap_threshold
+
+    #keeps rows outside of the threshold
     gap_starts = diffs[gap_mask].index
 
+    #no gaps
     if len(gap_starts) == 0:
         return sub
 
+    #create a NaN row for each gap
     nan_rows = pd.DataFrame(
         {c: np.nan for c in sub.columns},
         index=gap_starts - pd.Timedelta(milliseconds=1)
     )
     nan_rows["person"] = person
 
+    #combine real data and NaN rows into a table and sorts by timestamp
     result = pd.concat([sub, nan_rows]).sort_index()
     return result
 
