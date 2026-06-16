@@ -241,3 +241,50 @@ tfig.text(0.5, 0.5, center_note, ha="center", va="center",
 tfig.savefig("outputs/Test_similarity_tables.png", dpi=300, bbox_inches="tight")
 
 plt.show()
+
+lat_col = find_col(data, ["lat"])
+lon_col = find_col(data, ["lon", "lng", "long"])
+
+if lat_col is None or lon_col is None:
+    print("Latitude/longitude columns not found.")
+else:
+    import plotly.graph_objects as go
+
+    fig_3d = go.Figure()
+
+    for r in recordings:
+        subset = data[data["recording"] == r].dropna(
+            subset=[lat_col, lon_col, "datetime"]
+        ).sort_values("datetime")
+
+        if subset.empty:
+            continue
+
+        time_numeric = (
+            subset["datetime"] - subset["datetime"].min()
+        ).dt.total_seconds()
+
+        color = f"rgb({int(colors[r][0]*255)}, {int(colors[r][1]*255)}, {int(colors[r][2]*255)})"
+
+        fig_3d.add_trace(go.Scatter3d(
+            x=time_numeric,
+            y=subset[lon_col],
+            z=subset[lat_col],
+            mode="lines+markers",
+            name=f"Recording {r}",
+            line=dict(color=color, width=3),
+            marker=dict(size=2, color=color),
+        ))
+
+    fig_3d.update_layout(
+        title="GPS Track Over Time (3D)",
+        scene=dict(
+            xaxis_title="Time (seconds)",
+            yaxis_title="Longitude",
+            zaxis_title="Latitude",
+        ),
+        height=800,
+    )
+
+    fig_3d.write_html("outputs/Test_location_3d.html")
+    fig_3d.show()
