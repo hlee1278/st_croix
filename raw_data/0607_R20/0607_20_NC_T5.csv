@@ -1,0 +1,4 @@
+Date,Time,Elapsed Seconds,Latitude,Longitude,Temperature Probe-Temperature (&#x2103;),Humidity-Humidity (%RH),Dew Point-Dew Point (&#x2103;),Heat Index-Heat Index (&#x2103;),Ambient Light Intensity-Light (lux)
+6/7/2026,3:46:23 PM,0,17.70755,-64.82445,32.3,51.2,22.1,37.9,332.5
+6/7/2026,3:46:24 PM,1,17.70756,-64.82445,32.1,51.2,22.1,37.8,932.2
+6/7/2026,3:46:25 PM,2,17.70756,-64.82445,32,51.2,22.1,37.8,814.2
