@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 import textwrap
+import colorsys
 
 #Load files
 files = glob.glob("raw_data/Test/*.csv")
@@ -63,8 +64,15 @@ for c in vars_all:
 
 
 recordings = sorted(data["recording"].unique(), key=int)
-cmap = plt.get_cmap("tab20")
-colors = {r: cmap(i % 20) for i, r in enumerate(recordings)}
+
+#Messing with the colors so that the colors (especially within groups) are pretty distinct
+n = len(recordings)
+group_size = 4
+colors = {}
+for i, r in enumerate(recordings):
+    g, pos = divmod(i, group_size)
+    hue = ((group_size * pos + g) / n) % 1.0
+    colors[r] = colorsys.hsv_to_rgb(hue, 0.65, 0.85)
 
 #Plotting
 fig, axes = plt.subplots(5, 1, figsize=(14, 18), sharex=True)
@@ -130,7 +138,7 @@ var_labels = {
     temp_col:  "Temp",
     light_col: "Light",
     heat_col:  "Heat",
-    humid_col: "Humid",
+    humid_col: "Humidity",
     dew_col:   "Dew",
 }
 
@@ -206,7 +214,7 @@ for ax, (group_name, result) in zip(taxes.flat, tables.items()):
         if shade > 0.6:
             cell.set_text_props(color="white")
 
-tfig.suptitle("PocketLab agreement by group (darker = bigger deviation)", fontsize=14, y=0.99)
+tfig.suptitle("PocketLab similarity by group", fontsize=14, y=0.99)
 
 #Big explanation
 main_note = ("First, we group the Pocketlabs into 4 groups of 4 based on which pocketlabs we tested together. Then, we calculated the group's average for every second. For each second, we calculated the difference between the group average and the indiviudal pocketlab's reading. Then, we calcualted the Root Mean Square Error (RMSE) for each pocketlab by squaring the difference, averaging them, and then square rooting the result. \n"
@@ -224,6 +232,12 @@ tfig.text(0.5, 0.965, main_note + "\n" + formula,
 
 #Just combatting spacing issues
 tfig.tight_layout(rect=[0, 0, 1, 0.80])
+
+#note in the middle of the 2x2 grid of tables (edit here)
+center_note = "NOTE: color intensity is scaled within each column (numbers in other columns aren't going to affect it)"
+tfig.text(0.5, 0.5, center_note, ha="center", va="center",
+          fontsize=11, color="#333333", wrap=True)
+
 tfig.savefig("outputs/Test_similarity_tables.png", dpi=300, bbox_inches="tight")
 
 plt.show()
