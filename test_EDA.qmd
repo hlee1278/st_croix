@@ -19,6 +19,7 @@ R31_kestrel <- R31_kestrel[-1, ]
 
 R31_kestrel$Temperature <- as.numeric(R31_kestrel$Temperature)
 R31_kestrel$`Wet Bulb Temp` <- as.numeric(R31_kestrel$`Wet Bulb Temp`)
+"Wet Bulb Globe Temperature"
 
 R31_kestrel <- R31_kestrel |> 
   mutate(across(4:12, as.numeric))
@@ -61,7 +62,8 @@ vars_to_plot <- c(
   "Wind Speed",
   "Heat Index",
   "Dew Point",
-  "Density Altitude"
+  "Density Altitude",
+  "Wet Bulb Globe Temperature"
 )
 
 for (v in vars_to_plot) {
