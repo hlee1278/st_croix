@@ -205,7 +205,7 @@ for r, (col, title) in enumerate(plots):
         ax.tick_params(axis="x", rotation=45, labelsize=7)
         ax.tick_params(axis="y", labelsize=7)
 
-#legend
+#creates one legend for respresenting people for whole figure
 handles = [plt.Line2D([0], [0], color=colors[p], lw=2) for p in people]
 labels  = list(people)
 fig.legend(handles, labels, loc="upper right", title="Person")
