@@ -1,5 +1,4 @@
-print("started script")
-
+#imports
 import pandas as pd
 import glob
 import os
@@ -7,17 +6,13 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 
-# ---------------------------------------------------
-# 1. ROUTE INPUT
-# ---------------------------------------------------
+#input route number
 route = input("Enter route (e.g. R31): ").upper()
 
 folder = glob.glob(f"raw_data/*_{route}")[0]
 files = glob.glob(os.path.join(folder, "*.csv"))
 
-# ---------------------------------------------------
-# 2. LOAD DATA
-# ---------------------------------------------------
+#load data
 dfs = []
 
 for f in files:
@@ -34,9 +29,7 @@ for f in files:
 data = pd.concat(dfs, ignore_index=True)
 data.columns = [c.strip() for c in data.columns]
 
-# ---------------------------------------------------
-# 3. DATETIME
-# ---------------------------------------------------
+#date and time
 data["datetime"] = pd.to_datetime(
     data["Date"].astype(str) + " " + data["Time"].astype(str),
     errors="coerce"
@@ -44,9 +37,7 @@ data["datetime"] = pd.to_datetime(
 data = data.dropna(subset=["datetime", "person"])
 data = data.sort_values("datetime")
 
-# ---------------------------------------------------
-# 4. FIND VARIABLES
-# ---------------------------------------------------
+#find variables
 def find_col(df, keys):
     for c in df.columns:
         if any(k in c.lower() for k in keys):
@@ -71,11 +62,7 @@ for c in vars_all:
     if c:
         data[c] = to_num(data[c])
 
-
-
-# ---------------------------------------------------
-# 5. OUTLIERS → NaN
-# ---------------------------------------------------
+#eliminate outliers outside of +-3 standard deviations
 for p in data["person"].unique():
     mask = data["person"] == p
     for c in vars_all:
@@ -85,9 +72,7 @@ for p in data["person"].unique():
             data.loc[mask & (data[c] > m + 3*s), c] = np.nan
             data.loc[mask & (data[c] < m - 3*s), c] = np.nan
 
-# ---------------------------------------------------
-# 6. BUILD COMPLETE SERIES WITH REAL GAP BREAKS
-# ---------------------------------------------------
+#build series with gaps
 def build_complete_series(df, person, value_col):
     sub = df[df["person"] == person].copy()
     sub = sub.sort_values("datetime").set_index("datetime")
@@ -96,41 +81,31 @@ def build_complete_series(df, person, value_col):
         return sub
 
     diffs = sub.index.to_series().diff().dropna()
-    diffs = diffs[diffs > pd.Timedelta(0)]
-    dt = diffs.mode()[0]
-
+    diffs_pos = diffs[diffs > pd.Timedelta(0)]
+    dt = diffs_pos.mode()[0]
     gap_threshold = dt * 1.5
 
-    rows = []
-    for i in range(len(sub)):
-        rows.append(sub.iloc[[i]])
-        if i < len(sub) - 1:
-            gap = sub.index[i + 1] - sub.index[i]
-            if gap > gap_threshold:
-                mid = sub.index[i] + gap / 2
-                nan_row = pd.DataFrame(
-                    {c: [np.nan] for c in sub.columns},
-                    index=[mid]
-                )
-                nan_row["person"] = person
-                rows.append(nan_row)
+    gap_mask = diffs > gap_threshold
+    gap_starts = diffs[gap_mask].index
 
-    return pd.concat(rows)
+    if len(gap_starts) == 0:
+        return sub
 
-# ---------------------------------------------------
-# 7. COLORS
-# ---------------------------------------------------
-colors = {
-    "KH": "#4C72B0",
-    "PU": "#DD8452",
-    "CC": "#55A868"
-}
+    nan_rows = pd.DataFrame(
+        {c: np.nan for c in sub.columns},
+        index=gap_starts - pd.Timedelta(milliseconds=1)
+    )
+    nan_rows["person"] = person
 
+    result = pd.concat([sub, nan_rows]).sort_index()
+    return result
+
+#colors
 people = sorted(data["person"].unique())
+default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+colors = {p: default_colors[i % len(default_colors)] for i, p in enumerate(people)}
 
-# ---------------------------------------------------
-# 8. PLOT
-# ---------------------------------------------------
+#plot
 fig, axes = plt.subplots(5, 2, figsize=(18, 18))
 
 plots = [
@@ -160,7 +135,7 @@ for r, (col, title) in enumerate(plots):
             ax.plot(
                 series.index,
                 series[col],
-                color=colors.get(p),
+                color=colors[p],
                 linewidth=1.5
             )
 
@@ -171,20 +146,16 @@ for r, (col, title) in enumerate(plots):
         ax.tick_params(axis="x", rotation=45, labelsize=7)
         ax.tick_params(axis="y", labelsize=7)
 
-# ---------------------------------------------------
-# 9. LEGEND
-# ---------------------------------------------------
-handles = [plt.Line2D([0], [0], color=c, lw=2) for c in colors.values()]
-labels  = list(colors.keys())
+#legend
+handles = [plt.Line2D([0], [0], color=colors[p], lw=2) for p in people]
+labels  = list(people)
 fig.legend(handles, labels, loc="upper right", title="Person")
 
-# ---------------------------------------------------
-# 10. SAVE
-# ---------------------------------------------------
+#save
 os.makedirs("outputs", exist_ok=True)
 plt.tight_layout()
 plt.savefig(
-    f"outputs/{route}_FINAL_NO_CONTINUITY.png",
+    f"outputs/{route}_AM_PM_multiplot.png",
     dpi=300,
     bbox_inches="tight"
 )
