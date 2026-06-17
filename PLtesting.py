@@ -50,6 +50,9 @@ heat_col  = find_col(data, ["heat"])
 humid_col = find_col(data, ["humid"])
 dew_col   = find_col(data, ["dew"])
 
+lat_col = find_col(data, ["lat"])
+lon_col = find_col(data, ["lon", "long", "lng"])
+
 vars_all = [temp_col, light_col, heat_col, humid_col, dew_col]
 
 def to_num(s):
@@ -242,28 +245,17 @@ tfig.savefig("outputs/Test_similarity_tables.png", dpi=300, bbox_inches="tight")
 
 plt.show()
 
-lat_col = find_col(data, ["lat"])
-lon_col = find_col(data, ["lon", "lng", "long"])
-
-if lat_col is None or lon_col is None:
-    print("Latitude/longitude columns not found.")
-else:
+if lat_col and lon_col: 
     import plotly.graph_objects as go
 
     fig_3d = go.Figure()
 
     for r in recordings:
-        subset = data[data["recording"] == r].dropna(
-            subset=[lat_col, lon_col, "datetime"]
-        ).sort_values("datetime")
-
+        subset = data[data["recording"] == r].dropna(subset=[lat_col, lon_col, "datetime"]).sort_values("datetime")
         if subset.empty:
             continue
 
-        time_numeric = (
-            subset["datetime"] - subset["datetime"].min()
-        ).dt.total_seconds()
-
+        time_numeric = (subset["datetime"] - subset["datetime"].min()).dt.total_seconds()
         color = f"rgb({int(colors[r][0]*255)}, {int(colors[r][1]*255)}, {int(colors[r][2]*255)})"
 
         fig_3d.add_trace(go.Scatter3d(
@@ -274,6 +266,7 @@ else:
             name=f"Recording {r}",
             line=dict(color=color, width=3),
             marker=dict(size=2, color=color),
+            legendgroup=r,
         ))
 
     fig_3d.update_layout(
@@ -282,9 +275,16 @@ else:
             xaxis_title="Time (seconds)",
             yaxis_title="Longitude",
             zaxis_title="Latitude",
+            yaxis=dict(tickformat=".4f"),
+            zaxis=dict(tickformat=".4f"),
         ),
+        legend=dict(title="Recording", groupclick="toggleitem"),
+        margin=dict(l=0, r=0, b=0, t=40),
         height=800,
     )
 
     fig_3d.write_html("outputs/Test_location_3d.html")
     fig_3d.show()
+
+else:
+    print("No lat/lon columns found. Columns available:", list(data.columns))
