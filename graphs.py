@@ -1,0 +1,288 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.dates as mdates
+import os
+import glob
+
+# ── SET YOUR FOLDER PATH HERE ──────────────────────────────────────────────────
+FOLDER = r"C:\Users\dresd\USVI_2026\combined_data\0617_R19"   # Windows example
+# FOLDER = "/Users/yourname/Documents/MyData"    # Mac/Linux example
+# ──────────────────────────────────────────────────────────────────────────────
+
+GAP_THRESHOLD_SECONDS = 2
+
+def load_files(folder):
+    patterns = ['*.xlsx', '*.xls', '*.csv']
+    file_paths = []
+    for pattern in patterns:
+        file_paths.extend(glob.glob(os.path.join(folder, pattern)))
+    return sorted(file_paths)
+
+def read_file(path):
+    ext = os.path.splitext(path)[1].lower()
+    return pd.read_csv(path) if ext == '.csv' else pd.read_excel(path)
+
+def parse_times(series):
+    parsed = pd.to_datetime(series, errors='coerce', format='mixed')
+    if parsed.isna().all():
+        return pd.to_numeric(series, errors='coerce'), False
+    return parsed, True
+
+def load_group(files):
+    loaded = []
+    for path in files:
+        name = os.path.basename(path)
+        try:
+            df = read_file(path)
+        except Exception as e:
+            print(f"Warning: Could not read '{name}': {e}")
+            continue
+        if 'time' not in df.columns or 'temp_probe' not in df.columns:
+            print(f"Warning: '{name}' missing 'time' or 'temp_probe'. Skipping.")
+            continue
+        df = df.dropna(subset=['time', 'temp_probe']).copy()
+        if df.empty:
+            continue
+        t, is_dt = parse_times(df['time'])
+        df['_t'] = t
+        df = df.dropna(subset=['_t']).sort_values('_t').reset_index(drop=True)
+        if df.empty:
+            continue
+        loaded.append((name, df, is_dt))
+    return loaded
+
+def classify_seconds(loaded):
+    is_datetime = any(is_dt for _, _, is_dt in loaded)
+    all_times = pd.concat([df['_t'] for _, df, _ in loaded])
+    global_min = all_times.min()
+
+    if is_datetime:
+        def to_int_seconds(series):
+            return ((series - global_min).dt.total_seconds()).astype(int)
+        global_max_sec = int((all_times.max() - global_min).total_seconds())
+    else:
+        def to_int_seconds(series):
+            return (series - global_min).astype(int)
+        global_max_sec = int(all_times.max() - global_min)
+
+    # coverage[sec] = number of distinct files with data at that second
+    coverage = {}
+    for name, df, is_dt in loaded:
+        secs = to_int_seconds(df['_t'])
+        for s in secs:
+            coverage[s] = coverage.get(s, 0) + 1
+
+    return global_min, global_max_sec, coverage, is_datetime
+
+def find_gap_regions(loaded):
+    """
+    Classify each second relative to the total number of files in this group:
+      - 0 files   -> 'none'
+      - 1..N-1    -> 'partial'  (some but not all; only meaningful when N >= 2)
+      - N files   -> 'all'      (full coverage, no issue)
+
+    When there is only 1 file, every second is either 'none' or 'all' —
+    there is no 'partial' state.
+    """
+    if not loaded:
+        return []
+
+    n_files = len(loaded)
+    global_min, global_max_sec, coverage, is_datetime = classify_seconds(loaded)
+
+    def sec_to_time(s):
+        if is_datetime:
+            return global_min + pd.Timedelta(seconds=int(s))
+        else:
+            return global_min + int(s)
+
+    regions = []
+    current_type = None
+    run_start = 0
+
+    for s in range(global_max_sec + 1):
+        n = coverage.get(s, 0)
+        if n == 0:
+            stype = 'none'
+        elif n < n_files:
+            stype = 'partial'   # only relevant when n_files >= 2
+        else:
+            stype = 'all'
+
+        if stype != current_type:
+            if current_type in ('none', 'partial'):
+                regions.append({
+                    'type':  current_type,
+                    'start': sec_to_time(run_start),
+                    'end':   sec_to_time(s),
+                })
+            current_type = stype
+            run_start = s
+
+    if current_type in ('none', 'partial'):
+        regions.append({
+            'type':  current_type,
+            'start': sec_to_time(run_start),
+            'end':   sec_to_time(global_max_sec),
+        })
+
+    return regions
+
+def fmt_time(t):
+    if isinstance(t, pd.Timestamp):
+        return t.strftime('%H:%M:%S')
+    return str(t)
+
+def set_time_axis(ax, is_datetime):
+    """Apply a clean time formatter to the x axis."""
+    if not is_datetime:
+        return
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=20, ha='right')
+
+def plot_group(ax, files, title):
+    loaded = load_group(files)
+    n_files = len(loaded)
+
+    if not loaded:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, 'No valid files', ha='center', va='center',
+                transform=ax.transAxes)
+        return []
+
+    is_datetime = any(is_dt for _, _, is_dt in loaded)
+
+    # ── Plot lines, split at gaps so no connecting lines ──
+    for name, df, is_dt in loaded:
+        threshold = (pd.Timedelta(seconds=GAP_THRESHOLD_SECONDS)
+                     if is_dt else GAP_THRESHOLD_SECONDS)
+        gap_indices = df.index[df['_t'].diff() > threshold].tolist()
+        split_points = [0] + gap_indices + [len(df)]
+
+        color = None
+        for i in range(len(split_points) - 1):
+            seg = df.iloc[split_points[i]:split_points[i + 1]]
+            if seg.empty:
+                continue
+            if color is None:
+                line, = ax.plot(seg['_t'], seg['temp_probe'], label=name)
+                color = line.get_color()
+            else:
+                ax.plot(seg['_t'], seg['temp_probe'], color=color)
+
+    # ── Shade gap regions ──
+    regions = find_gap_regions(loaded)
+
+    has_none    = False
+    has_partial = False
+    for r in regions:
+        if r['type'] == 'none':
+            ax.axvspan(r['start'], r['end'], color='red',    alpha=0.25, zorder=0)
+            has_none = True
+        elif r['type'] == 'partial' and n_files >= 2:
+            ax.axvspan(r['start'], r['end'], color='orange', alpha=0.20, zorder=0)
+            has_partial = True
+
+    ax.set_title(title)
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Temp Probe')
+    set_time_axis(ax, is_datetime)
+
+    handles, labels = ax.get_legend_handles_labels()
+    if has_partial:
+        handles.append(mpatches.Patch(color='orange', alpha=0.4,
+                                      label='Only 1 lab has data'))
+    if has_none:
+        handles.append(mpatches.Patch(color='red', alpha=0.4,
+                                      label='No lab has data'))
+    ax.legend(handles=handles)
+
+    return regions
+
+def build_summary_text(am_regions, pm_regions, am_count, pm_count):
+    """
+    Group all 'partial' messages together, then all 'none' messages.
+    Skip partial entries for blocks that only have 1 file (not meaningful).
+    """
+    partial_lines = []
+    none_lines    = []
+
+    for block_label, regions, n_files in [
+        ('AM', am_regions, am_count),
+        ('PM', pm_regions, pm_count),
+    ]:
+        for r in regions:
+            line = f"  [{block_label}]  {fmt_time(r['start'])} → {fmt_time(r['end'])}"
+            if r['type'] == 'partial' and n_files >= 2:
+                partial_lines.append(line)
+            elif r['type'] == 'none':
+                none_lines.append(line)
+
+    parts = []
+    if partial_lines:
+        parts.append("Only one pocket lab collected data for time ranging:")
+        parts.extend(partial_lines)
+    if none_lines:
+        if parts:
+            parts.append("")
+        parts.append("No pocket lab collected data for time ranging:")
+        parts.extend(none_lines)
+
+    return "\n".join(parts) if parts else "No coverage gaps detected."
+
+def plot_temp_vs_time(folder):
+    all_files = load_files(folder)
+    if not all_files:
+        print(f"No spreadsheet files found in: {folder}")
+        return
+
+    run_label = os.path.basename(os.path.normpath(folder))
+
+    am_files, pm_files, other_files = [], [], []
+    for path in all_files:
+        name = os.path.basename(path).upper()
+        if 'AM' in name:
+            am_files.append(path)
+        elif 'PM' in name:
+            pm_files.append(path)
+        else:
+            other_files.append(path)
+
+    if other_files:
+        print("Note: files without 'AM' or 'PM' in name will be skipped:")
+        for f in other_files:
+            print(f"  {os.path.basename(f)}")
+
+    fig = plt.figure(figsize=(14, 13))
+    ax_am = fig.add_axes([0.08, 0.52, 0.88, 0.38])
+    ax_pm = fig.add_axes([0.08, 0.10, 0.88, 0.38])
+
+    fig.suptitle(f'Time vs Temp Probe  —  {run_label}', fontsize=14, fontweight='bold')
+
+    am_regions = plot_group(ax_am, am_files, 'Morning Block (AM)')
+    pm_regions = plot_group(ax_pm, pm_files, 'Afternoon Block (PM)')
+
+    summary = build_summary_text(am_regions, pm_regions,
+                                  len(am_files), len(pm_files))
+    print(f"\n[{run_label}] Coverage report:\n{summary}")
+
+    fig.text(
+        0.08, 0.065,
+        summary,
+        fontsize=8,
+        verticalalignment='top',
+        horizontalalignment='left',
+        family='monospace',
+        color='#333333',
+    )
+
+    output_name = f"recording_gaps_{run_label}_noGPS.png"
+    output_path = os.path.join(folder, output_name)
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"\nPlot saved to: {output_path}")
+    plt.show()
+
+if __name__ == '__main__':
+    plot_temp_vs_time(FOLDER)
