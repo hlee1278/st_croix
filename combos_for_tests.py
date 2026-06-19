@@ -141,8 +141,15 @@ for filepath in kestrel_files:
         continue
 
     # --- Read the CSV ---
+    # Kestrel CSVs have this structure:
+    #   Row 1: Device Name   (metadata — skip)
+    #   Row 2: Device Model  (metadata — skip)
+    #   Row 3: Serial Number (metadata — skip)
+    #   Row 4: Column headers  ← real header row  (header=3, zero-indexed)
+    #   Row 5: Units row     (e.g. "°F", "%", "inHg" — skip, not data)
+    #   Row 6+: Actual data
     try:
-        df = pd.read_csv(filepath, dtype=str)
+        df = pd.read_csv(filepath, dtype=str, header=3, skiprows=[4])
     except Exception as e:
         print(f"  ERROR reading '{filename}': {e}")
         print("  Skipping this file.")
@@ -152,18 +159,22 @@ for filepath in kestrel_files:
         print(f"  WARNING: '{filename}' is empty — skipping.")
         continue
 
-    # --- Check that columns match the first file ---
+    # --- Note any new or missing columns compared to the first file ---
+    # Different Kestrel models may record different columns (e.g. some lack
+    # "Probability of Ignition" or "Vapor Pressure Deficit"). Rather than
+    # skipping those files, we accept them and fill missing columns with
+    # blank values when everything is combined at the end.
     if expected_cols is None:
         expected_cols = list(df.columns)
         print(f"  Columns detected (from first file): {expected_cols}")
         print()
-
-    if list(df.columns) != expected_cols:
-        print(f"  ERROR: '{filename}' has different column headers than the first file.")
-        print(f"    Expected : {expected_cols}")
-        print(f"    Found    : {list(df.columns)}")
-        print("  Skipping this file — fix the column headers and re-run.")
-        continue
+    else:
+        missing_here = [c for c in expected_cols if c not in df.columns]
+        extra_here   = [c for c in df.columns if c not in expected_cols]
+        if missing_here:
+            print(f"  NOTE: '{filename}' is missing column(s): {missing_here} — will be blank for these rows.")
+        if extra_here:
+            print(f"  NOTE: '{filename}' has extra column(s) not in other files: {extra_here} — will be included.")
 
     # --- Add kestrel_name as the first column ---
     df.insert(0, "kestrel_name", kestrel_name)
@@ -182,7 +193,7 @@ if not frames:
 # SECTION 6: COMBINE ALL DATA INTO ONE TABLE
 # =============================================================================
 
-combined = pd.concat(frames, ignore_index=True)
+combined = pd.concat(frames, ignore_index=True, join="outer")
 
 print(f"=== Combined total: {len(combined)} rows across {len(frames)} file(s) ===")
 print()
