@@ -37,15 +37,15 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # --- Route Information -------------------------------------------------------
 
-ROUTE_NAME    = "mon_bijou_w"
+ROUTE_NAME    = "rainforest_e"
                             # Full route name as used in data org system
                             # (e.g., "st_thomas_town", "hull_bay", "uvi_lindbergh")
 
-ROUTE_ABBREV  = "bijou_w"
+ROUTE_ABBREV  = "rainforest_e"
                             # Short abbreviation used in route_id
                             # (e.g., "stt", "hull", "uvi")
 
-ROUTE_NUMBER  = 13
+ROUTE_NUMBER  = 27
                             # Route number as an integer (e.g., 6, 30)
                             # This should match the number in your folder name
 
@@ -59,12 +59,12 @@ YEAR          = "2026"
 
 # --- Folder Paths ------------------------------------------------------------
 
-SESSION_FOLDER = r"C:\Users\dresd\USVI_2026\raw_data\0617_R13"
+SESSION_FOLDER = r"C:\Users\dresd\USVI_2026\raw_data\0621_R27"
                             # Path to the folder containing all your session CSV files
                             # The folder name MUST follow the format: {MMDD}_R{route number}
                             # Example: "C:\Users\dresd\USVI_2026\raw_data\0615_R06"
 
-OUTPUT_DIR     = r"C:\Users\dresd\USVI_2026\combined_data\0617_R13\lat_long_present_R13"
+OUTPUT_DIR     = r"C:\Users\dresd\USVI_2026\combined_data\0621_R27\lat_long_present_R27"
                             # Folder where cleaned Excel output files will be saved
                             # The folder must already exist before running this script
 
@@ -184,7 +184,15 @@ print()
 # =============================================================================
 # SECTION 4: EXTRACT INITIALS FROM EACH CSV FILENAME
 # =============================================================================
-# Two methods are tried in order:
+# Three methods are tried in order:
+#
+# METHOD 0 — PocketLab number (checked first, before any initials logic):
+#   If any underscore-separated part of the filename matches "PL" followed by
+#   one or more digits (case-insensitive), that whole part is returned as-is.
+#   "PL" is never used as personal initials, so any occurrence of PL+number
+#   is unambiguously a PocketLab device identifier.
+#   Example: "0621_R27_PL1_T1.csv"  → "PL1"
+#            "0621_R27_PL12_T2.csv" → "PL12"
 #
 # METHOD 1 — Standard format: {MMDD}_R{route}_{INITIALS}_T{number}.csv
 #   Initials are the part between the 2nd and 3rd underscore.
@@ -207,6 +215,13 @@ def extract_initials(filepath):
     name_no_ext = os.path.splitext(filename)[0]   # Remove .csv
     parts       = name_no_ext.split("_")
 
+    # --- Method 0: PocketLab number ---
+    # Scan all parts for "PL" followed by one or more digits.
+    # Checked before initials logic because "PL" is never a valid set of initials.
+    for part in parts:
+        if re.fullmatch(r"PL\d+", part, re.IGNORECASE):
+            return part.upper()  # e.g. "pl1" → "PL1"
+
     # --- Method 1: Standard format ---
     # The third part (index 2) should be pure letters, e.g. "BH" or "TJ"
     if len(parts) >= 3 and re.fullmatch(r"[A-Za-z]+", parts[2]):
@@ -225,7 +240,7 @@ def extract_initials(filepath):
     return None
 
 
-csv_by_initials = {}   # { "BH": [file1, file2, ...], "TJ": [...], ... }
+csv_by_initials = {}   # { "BH": [file1, file2, ...], "TJ": [...], "PL1": [...], ... }
 
 for filepath in all_csvs:
     initials = extract_initials(filepath)

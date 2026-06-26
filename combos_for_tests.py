@@ -1,18 +1,18 @@
 """
-KESTREL SPREADSHEET COMBINER
-==============================
+SPREADSHEET COMBINER
+=====================
 PURPOSE:
-    Reads all Kestrel CSV files from a single folder, adds a "kestrel_name"
-    column to each (pulled from the filename, e.g. "0618_TEST2_KESTRELFIRE_1.csv"
-    → "FIRE"), and combines everything into one Excel file saved in the same folder.
+    Reads all CSV files from a single folder, adds a "pocketlab_number" column
+    to each (pulled from the filename, e.g. "0618_TEST2_PL1.csv" → 1), and
+    combines everything into one Excel file saved in the same folder.
 
-    Only files with "KESTREL" in the name are used. All others are skipped.
+    Files with "KESTREL" anywhere in their name are automatically skipped.
 
 HOW TO USE THIS SCRIPT:
     1. Fill in Section 1 below (the only section you need to edit)
-    2. Run the script:   python combine_kestrel.py
+    2. Run the script:   python combine_spreadsheets.py
     3. The combined output file will be saved inside the same folder as your CSVs,
-       automatically named:  COMBINED_KESTREL_<folder name>.xlsx
+       automatically named:  COMBINED_<folder name>.xlsx
 
 DEPENDENCIES — install once if not already installed:
     pip install pandas openpyxl
@@ -31,11 +31,11 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 # =============================================================================
 
 INPUT_FOLDER = r"C:\Users\dresd\Downloads\0618_R1000"
-                            # Path to the folder containing the Kestrel CSV files
-                            # Only files with "KESTREL" in the filename will be read
-                            # All other CSV files in the folder will be skipped
+                            # Path to the folder containing the CSV files to combine
+                            # All .csv files in this folder will be read and merged
+                            # (except any with "KESTREL" in the filename)
 
-SHEET_NAME = "Combined_Kestrel"
+SHEET_NAME = "Combined"
                             # Name of the sheet in the output Excel file
                             # Keep it short — Excel allows a maximum of 31 characters
 
@@ -53,18 +53,14 @@ if not os.path.isdir(INPUT_FOLDER):
     print(f"ERROR: Input folder not found: {INPUT_FOLDER}")
     sys.exit(1)
 
-if len(SHEET_NAME) > 31:
-    print(f"ERROR: SHEET_NAME is too long ({len(SHEET_NAME)} characters). Excel allows a maximum of 31.")
-    sys.exit(1)
-
 # Output file is saved inside the same folder, named after the folder itself
-# Example: folder "0618_R1000" → output file "COMBINED_KESTREL_0618_R1000.xlsx"
+# Example: folder "0618_R1000" → output file "COMBINED_0618_R1000.xlsx"
 folder_name = os.path.basename(os.path.normpath(INPUT_FOLDER))
-OUTPUT_FILE = os.path.join(INPUT_FOLDER, f"COMBINED_KESTREL_{folder_name}.xlsx")
+OUTPUT_FILE = os.path.join(INPUT_FOLDER, f"COMBINED_{folder_name}.xlsx")
 
 
 # =============================================================================
-# SECTION 3: FIND ALL CSV FILES, KEEPING ONLY KESTREL FILES
+# SECTION 3: FIND ALL CSV FILES, SKIPPING KESTREL FILES
 # =============================================================================
 
 all_files_in_folder = sorted([
@@ -72,84 +68,73 @@ all_files_in_folder = sorted([
     if f.lower().endswith(".csv")
 ])
 
-kestrel_files = []
-skipped       = []
+csv_files = []
+skipped   = []
 
 for f in all_files_in_folder:
-    if re.search(r"kestrel", f, re.IGNORECASE):
-        kestrel_files.append(os.path.join(INPUT_FOLDER, f))
-    else:
+    if re.search(r"KESTREL", f, re.IGNORECASE):  # BUG FIX: was r"PL" — caused PocketLab files to be skipped instead of Kestrel files
         skipped.append(f)
+    else:
+        csv_files.append(os.path.join(INPUT_FOLDER, f))
 
 if skipped:
-    print(f"=== Skipping {len(skipped)} non-Kestrel file(s) ===")
+    print(f"=== Skipping {len(skipped)} KESTREL file(s) ===")
     for f in skipped:
         print(f"  SKIPPED: {f}")
     print()
 
-if not kestrel_files:
-    print(f"ERROR: No Kestrel CSV files found in folder: {INPUT_FOLDER}")
-    print("       Make sure filenames contain 'KESTREL' (e.g. 0618_TEST2_KESTRELFIRE_1.csv)")
+if not csv_files:
+    print(f"ERROR: No usable CSV files found in folder: {INPUT_FOLDER}")
     sys.exit(1)
 
-print(f"=== Found {len(kestrel_files)} Kestrel CSV file(s) to combine ===")
-for f in kestrel_files:
+print(f"=== Found {len(csv_files)} CSV file(s) to combine ===")
+for f in csv_files:
     print(f"  {os.path.basename(f)}")
 print()
 
 
 # =============================================================================
-# SECTION 4: EXTRACT KESTREL NAME FROM FILENAME
+# SECTION 4: EXTRACT POCKETLAB NUMBER FROM FILENAME
 # =============================================================================
-# The kestrel name is the word that comes immediately after "KESTREL" in the
-# filename (letters only, up to the next underscore or number).
-#
-# Examples:
-#   "0618_TEST2_KESTRELFIRE_1.csv"  → kestrel_name = "FIRE"
-#   "0618_TEST2_KESTRELWIND_2.csv"  → kestrel_name = "WIND"
+# The PocketLab number is the digits that follow "_PL" in the filename.
+# Example: "0618_TEST2_PL1.csv" → pocketlab_number = 1
+#          "0618_TEST2_PL14.csv" → pocketlab_number = 14
 
-def extract_kestrel_name(filepath):
+def extract_pocketlab_number(filepath):
     """
-    Returns the name that follows 'KESTREL' in the filename (uppercase).
-    Returns None if no such name can be found.
+    Returns the PocketLab number (integer) from a CSV filename.
+    Returns None if no _PL followed by digits is found.
     """
     filename = os.path.basename(filepath)
-    # Match "KESTREL" followed immediately by one or more letters
-    match = re.search(r"KESTREL([A-Za-z]+)", filename, re.IGNORECASE)
+    match = re.search(r"_PL(\d+)", filename, re.IGNORECASE)
     if match:
-        return match.group(1).upper()
+        return int(match.group(1))
     return None
 
 
 # =============================================================================
-# SECTION 5: READ ALL KESTREL FILES, ADD kestrel_name COLUMN, VERIFY COLUMNS MATCH
+# SECTION 5: READ ALL FILES AND ADD POCKETLAB NUMBER COLUMN
 # =============================================================================
+# Column order and extra columns (e.g. Latitude/Longitude) may differ between
+# devices — that's fine. We align everything by column NAME at combine time,
+# not by column position. Missing columns get filled with blanks automatically.
 
-print("Reading Kestrel files...")
+print("Reading files...")
 
-frames        = []
-expected_cols = None   # Set from the first file; all others must match
+frames = []
 
-for filepath in kestrel_files:
+for filepath in csv_files:
     filename = os.path.basename(filepath)
 
-    # --- Extract Kestrel name ---
-    kestrel_name = extract_kestrel_name(filepath)
-    if kestrel_name is None:
-        print(f"  WARNING: Could not find a name after 'KESTREL' in '{filename}' — skipping.")
-        print("           Expected format: ...KESTREL<NAME>... (e.g. KESTRELFIRE)")
+    # --- Extract PocketLab number ---
+    pl_number = extract_pocketlab_number(filepath)
+    if pl_number is None:
+        print(f"  WARNING: Could not find a PocketLab number (_PL#) in '{filename}' — skipping.")
         continue
 
     # --- Read the CSV ---
-    # Kestrel CSVs have this structure:
-    #   Row 1: Device Name   (metadata — skip)
-    #   Row 2: Device Model  (metadata — skip)
-    #   Row 3: Serial Number (metadata — skip)
-    #   Row 4: Column headers  ← real header row  (header=3, zero-indexed)
-    #   Row 5: Units row     (e.g. "°F", "%", "inHg" — skip, not data)
-    #   Row 6+: Actual data
     try:
-        df = pd.read_csv(filepath, dtype=str, header=3, skiprows=[4])
+        df = pd.read_csv(filepath, dtype=str)
     except Exception as e:
         print(f"  ERROR reading '{filename}': {e}")
         print("  Skipping this file.")
@@ -159,33 +144,16 @@ for filepath in kestrel_files:
         print(f"  WARNING: '{filename}' is empty — skipping.")
         continue
 
-    # --- Note any new or missing columns compared to the first file ---
-    # Different Kestrel models may record different columns (e.g. some lack
-    # "Probability of Ignition" or "Vapor Pressure Deficit"). Rather than
-    # skipping those files, we accept them and fill missing columns with
-    # blank values when everything is combined at the end.
-    if expected_cols is None:
-        expected_cols = list(df.columns)
-        print(f"  Columns detected (from first file): {expected_cols}")
-        print()
-    else:
-        missing_here = [c for c in expected_cols if c not in df.columns]
-        extra_here   = [c for c in df.columns if c not in expected_cols]
-        if missing_here:
-            print(f"  NOTE: '{filename}' is missing column(s): {missing_here} — will be blank for these rows.")
-        if extra_here:
-            print(f"  NOTE: '{filename}' has extra column(s) not in other files: {extra_here} — will be included.")
+    # --- Add pocketlab_number as the first column ---
+    df.insert(0, "pocketlab_number", pl_number)
 
-    # --- Add kestrel_name as the first column ---
-    df.insert(0, "kestrel_name", kestrel_name)
-
-    print(f"  {filename}: Kestrel '{kestrel_name}', {len(df)} row(s)")
+    print(f"  {filename}: PocketLab {pl_number}, {len(df)} row(s), cols: {list(df.columns)}")
     frames.append(df)
 
 print()
 
 if not frames:
-    print("ERROR: No Kestrel files could be read successfully. Nothing to combine.")
+    print("ERROR: No files could be read successfully. Nothing to combine.")
     sys.exit(1)
 
 
@@ -193,7 +161,7 @@ if not frames:
 # SECTION 6: COMBINE ALL DATA INTO ONE TABLE
 # =============================================================================
 
-combined = pd.concat(frames, ignore_index=True, join="outer")
+combined = pd.concat(frames, ignore_index=True)
 
 print(f"=== Combined total: {len(combined)} rows across {len(frames)} file(s) ===")
 print()
@@ -241,7 +209,7 @@ for col in ws.columns:
 wb.save(OUTPUT_FILE)
 
 print()
-print(f"=== Done! Combined Kestrel file saved to: {OUTPUT_FILE} ===")
+print(f"=== Done! Combined file saved to: {OUTPUT_FILE} ===")
 print(f"    Sheet : {SHEET_NAME}")
 print(f"    Rows  : {len(combined)}")
 print(f"    Cols  : {', '.join(combined.columns)}")

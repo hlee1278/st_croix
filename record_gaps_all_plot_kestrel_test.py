@@ -1,5 +1,5 @@
 """
-RECORDING GAP VISUALIZATION SCRIPT (including pocket lab data missing latitude and longitude)
+RECORDING GAP VISUALIZATION SCRIPT
 ==================================
 PURPOSE:
     Reads all cleaned route data files (Excel or CSV) from a single folder,
@@ -56,7 +56,7 @@ import glob
 # =============================================================================
 
 # ── SET YOUR FOLDER PATH HERE ──────────────────────────────────────────────────
-FOLDER = r"C:\Users\dresd\USVI_2026\combined_data\0621_R27\all_R27"  # Windows example
+FOLDER = r"C:\Users\dresd\USVI_2026\combined_data\0607_R17\all_R17"  # Windows example
 # FOLDER = "/Users/yourname/Documents/MyData"    # Mac/Linux example
 
 # Folder containing cleaned route files
@@ -78,7 +78,9 @@ FOLDER = r"C:\Users\dresd\USVI_2026\combined_data\0621_R27\all_R27"  # Windows e
 #
 # Leave the list empty ( [] ) if you have no kestrel files for this run.
 KESTREL_FILES = [
-r"C:\Users\dresd\USVI_2026\raw_data\0621_R27\0621_R27_WBGT_MF_AM.csv"
+r"C:\Users\dresd\USVI_2026\raw_data\0607_R17\0607_R17_KESTREL_PM2.csv",
+r"C:\Users\dresd\USVI_2026\raw_data\0607_R17\0607_R17_KESTREL_AM.csv",
+r"C:\Users\dresd\USVI_2026\raw_data\0607_R17\0607_R17_KESTREL_PM1.csv"
     # r"C:\Users\dresd\USVI_2026\kestrel_data\kestrel_R17_AM_stop1.csv",
     # r"C:\Users\dresd\USVI_2026\kestrel_data\kestrel_R17_AM_stop2.csv",
     # r"C:\Users\dresd\USVI_2026\kestrel_data\kestrel_R17_PM_stop1.csv",
@@ -452,18 +454,8 @@ def plot_group(ax, files, title, kestrel_paths=None, axis_start_time=None):
     # ── Shade kestrel stop periods (drawn above red/orange) ──
     has_stop = False
     for start_dt, end_dt in stop_intervals:
-        ax.axvspan(start_dt, end_dt, color='#77F79B', alpha=0.35, zorder=1)
+        ax.axvspan(start_dt, end_dt, color='#7EC8E3', alpha=0.35, zorder=1)
         has_stop = True
-
-    # ── Shade the 15 minutes immediately before the first kestrel reading ──
-    has_pre_kestrel = False
-    if stop_intervals:
-        first_kestrel_start = min(start for start, _ in stop_intervals)
-        pre_start = first_kestrel_start - pd.Timedelta(minutes=15)
-        ax.axvspan(pre_start, first_kestrel_start, color='#CCDFFC',
-                   alpha=1,
-                   zorder=0.5)
-        has_pre_kestrel = True
 
     ax.set_title(title, pad = 12)
     ax.set_xlabel('Time')
@@ -477,11 +469,8 @@ def plot_group(ax, files, title, kestrel_paths=None, axis_start_time=None):
 
     handles, labels = ax.get_legend_handles_labels()
     if has_stop:
-        handles.append(mpatches.Patch(color='#77F79B', alpha=0.5,
+        handles.append(mpatches.Patch(color='#7EC8E3', alpha=0.5,
                                       label='Pocket lab stop (kestrel reading)'))
-    if has_pre_kestrel:
-        handles.append(mpatches.Patch(color='#CCDFFC', alpha=0.6,
-                                      label='15 min before first kestrel reading'))
     if has_partial:
         handles.append(mpatches.Patch(color='orange', alpha=0.4,
                                       label="Missing 1 lab's data"))
