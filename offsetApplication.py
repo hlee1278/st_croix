@@ -5,12 +5,12 @@ import os
 
 #THIS IS THE ONLY LINE YOU NEED TO EDIT
 #Put the path to the folder that holds your Excel files below. This folder is the one that contains the "somewhat clean" data (it's the folder that has one excel file and then a subfolder)
-ROOT_DIR = "/Users/timjun/Desktop/USVI_2026/combined_data/0607_R17_wNewCode"
+ROOT_DIR = "/Users/timjun/Desktop/USVI_2026/combined_data/0608_R30"
 
 #Nothing to touch below this line
-#Folder created INSIDE ROOT_DIR to hold the offset files. It keeps the
-#original folder's name and just adds "offset output".
-OUTPUT_DIR = os.path.basename(os.path.normpath(ROOT_DIR)) + " offset output"
+#Folder created INSIDE ROOT_DIR to hold the cleaned files. It keeps the
+#original folder's name and just adds "cleaned output".
+OUTPUT_DIR = os.path.basename(os.path.normpath(ROOT_DIR)) + " cleaned output"
 
 #These are the offset numbers based on Dresden's tests
 offsets = {
@@ -42,6 +42,101 @@ CATEGORY_KEYWORDS = {
     "dew":      ["dew"],
     "heat":     ["heat"],
 }
+
+# Columns used to identify outliers (standard deviation elimination)
+VALUE_COLUMNS = [
+    "temp_probe",
+    "humidity",
+    "dew_point",
+    "heat_index",
+    "ambient_light",
+]
+
+# Outlier threshold
+SD_CUTOFF = 3
+
+
+# =============================================================================
+# FUNCTION TO IDENTIFY AND REMOVE OUTLIER ROWS
+# =============================================================================
+
+def remove_outliers_by_sd(data, value_columns, sd_cutoff=3):
+    """
+    Remove rows containing values more than sd_cutoff standard deviations
+    from the mean in any of the specified columns.
+
+    Missing values are not treated as outliers and are retained.
+
+    Returns:
+        cleaned_data  - DataFrame with outlier rows removed
+        removed_data  - DataFrame containing removed rows
+        statistics    - DataFrame containing means, SDs, and cutoff values
+        outlier_flags - DataFrame showing which columns flagged each row
+    """
+
+    data = data.copy()
+
+    # Convert the sensor columns to numeric values.
+    # Non-numeric entries become missing values (NaN).
+    for column in value_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+
+    # Calculate the mean and standard deviation for each column.
+    # pandas mean(skipna=True) and std(skipna=True) are similar to
+    # R's mean(x, na.rm = TRUE) and sd(x, na.rm = TRUE).
+    means = data[value_columns].mean(skipna=True)
+    standard_deviations = data[value_columns].std(skipna=True)
+
+    # Create a table showing the outlier limits for each variable.
+    statistics = pd.DataFrame({
+        "mean": means,
+        "standard_deviation": standard_deviations,
+        "lower_limit": means - sd_cutoff * standard_deviations,
+        "upper_limit": means + sd_cutoff * standard_deviations,
+    })
+
+    # Create a TRUE/FALSE table for each row and sensor column.
+    # A value is an outlier when it is outside:
+    #
+    # mean - 3*SD  to  mean + 3*SD
+    #
+    outlier_flags = pd.DataFrame(False, index=data.index, columns=value_columns)
+
+    for column in value_columns:
+        mean_value = means[column]
+        sd_value = standard_deviations[column]
+
+        # If there is insufficient variation or insufficient data,
+        # do not flag values in that column.
+        if pd.isna(sd_value) or sd_value == 0:
+            continue
+
+        outlier_flags[column] = (
+            data[column].notna()
+            & (
+                (data[column] < mean_value - sd_cutoff * sd_value)
+                | (data[column] > mean_value + sd_cutoff * sd_value)
+            )
+        )
+
+    # A row is removed if any of the five sensor columns is an outlier.
+    rows_to_remove = outlier_flags.any(axis=1)
+
+    # Add an indicator showing why a row was removed.
+    removed_data = data.loc[rows_to_remove].copy()
+
+    if not removed_data.empty:
+        removed_data["outlier_columns"] = (
+            outlier_flags.loc[rows_to_remove]
+            .apply(
+                lambda row: ", ".join(row.index[row].tolist()),
+                axis=1
+            )
+        )
+
+    cleaned_data = data.loc[~rows_to_remove].copy()
+
+    return cleaned_data, removed_data, statistics, outlier_flags
 
 
 #find a column whose name contains any of the given keywords
@@ -85,11 +180,15 @@ def apply_offsets(df):
 
 
 def main():
+    #don't walk into the folder we write results to
+    out_root = os.path.join(ROOT_DIR, OUTPUT_DIR)
+
     #every .xlsx under ROOT_DIR, skipping Excel temp files and prior outputs
     paths = [
         p for p in glob.glob(os.path.join(ROOT_DIR, "**", "*.xlsx"), recursive=True)
         if not os.path.basename(p).startswith("~$")
-        and not p.endswith("_offset.xlsx")
+        and not p.endswith("_cleaned.xlsx")
+        and not os.path.abspath(p).startswith(os.path.abspath(out_root) + os.sep)
     ]
 
     if not paths:
@@ -103,14 +202,27 @@ def main():
         df = pd.read_excel(path)
         df, n = apply_offsets(df)
 
+        #then drop rows more than SD_CUTOFF standard deviations from the mean
+        clean_cols = [c for c in VALUE_COLUMNS if c in df.columns]
+        removed = 0
+        if clean_cols:
+            df, removed_data, statistics, outlier_flags = remove_outliers_by_sd(
+                data=df,
+                value_columns=clean_cols,
+                sd_cutoff=SD_CUTOFF,
+            )
+            removed = len(removed_data)
+        else:
+            print("  ! none of the outlier columns were found - skipping SD cleaning")
+
         #put the offset folder INSIDE ROOT_DIR, mirroring its sub-folder layout
         rel = os.path.relpath(path, ROOT_DIR)
         base, ext = os.path.splitext(rel)
-        out_path = os.path.join(ROOT_DIR, OUTPUT_DIR, base + "_offset" + ext)
+        out_path = os.path.join(ROOT_DIR, OUTPUT_DIR, base + "_cleaned" + ext)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
         df.to_excel(out_path, index=False)
-        print(f"  offset applied to {n} rows -> {out_path}\n")
+        print(f"  offset applied to {n} rows, removed {removed} outlier row(s) -> {out_path}\n")
 
     print("All done!")
 
