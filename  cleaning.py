@@ -5,7 +5,7 @@ import os
 
 #THIS IS THE ONLY LINE YOU NEED TO EDIT
 #Put the path to the folder that holds your Excel files below. This folder is the one that contains the "somewhat clean" data (it's the folder that has one excel file and then a subfolder)
-ROOT_DIR = "/Users/timjun/Desktop/USVI_2026/combined_data/0716_R16"
+ROOT_DIR = "/Users/timjun/Desktop/USVI_2026/combined_data/0705_R29"
 
 #Nothing to touch below this line
 #Folder created INSIDE ROOT_DIR to hold the cleaned files. It keeps the
