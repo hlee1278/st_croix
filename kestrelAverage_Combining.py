@@ -20,7 +20,7 @@ import pandas as pd
 
 # EDIT THIS: the folder that holds your Kestrel CSVs.
 
-INPUT_FOLDER = "/Users/timjun/Desktop/USVI_2026/kestral_files"
+INPUT_FOLDER = "/Users/timjun/Desktop/USVI_2026/kestrel_data_cleaned"
 
 # Where the combined sheet is saved (default location = alongside this script)
 OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kestrel_averages.csv")
@@ -63,17 +63,19 @@ def smart_round(value):
 
 
 def read_device_name(path):
-    """Pull the Kestrel name out of the first line: 'Device Name,<name>' (ignoring trailing commas)."""
-    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+    """Pull the Kestrel name out of the first line: 'Device Name,<name>' (ignoring trailing commas).
+    utf-8-sig strips the BOM that cleaned exports often add at the start of the file."""
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as f:
         first_line = f.readline()
     fields = next(csv.reader([first_line]))
     return fields[1].strip() if len(fields) > 1 else ""
 
 
 def is_kestrel_file(path):
-    """A Kestrel export starts with a 'Device Name,...' line."""
-    with open(path, encoding="utf-8", errors="replace") as f:
-        return f.readline().strip().lower().startswith("device name")
+    """A Kestrel export starts with a 'Device Name,...' line (BOM-safe)."""
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        first = f.readline().strip().lower()
+    return first.startswith("device name")
 
 
 def route_number(path):
@@ -103,15 +105,22 @@ def first_nonblank(series):
 def process_file(path):
     """Return (summary_row_dict, units_dict, ordered_columns, warnings) for one Kestrel CSV."""
     # header = row 4, so the first "data" row read here is actually the units row
-    df = pd.read_csv(path, skiprows=METADATA_ROWS, dtype=str, keep_default_na=False)
+    # utf-8-sig handles the BOM that cleaned CSVs often start with
+    df = pd.read_csv(path, skiprows=METADATA_ROWS, dtype=str, keep_default_na=False,
+                     encoding="utf-8-sig")
     units = df.iloc[0]
     data = df.iloc[1:].reset_index(drop=True)
 
     device = read_device_name(path)
     route = route_number(path)
 
-    start_col = "Start time" if "Start time" in data.columns else None
-    time_val = clean_start_time(first_nonblank(data[start_col])) if start_col is not None else ""
+    # prefer the built-in Start time field; cleaned exports often only have FORMATTED DATE_TIME
+    if "Start time" in data.columns:
+        time_val = clean_start_time(first_nonblank(data["Start time"]))
+    elif "FORMATTED DATE_TIME" in data.columns:
+        time_val = first_nonblank(data["FORMATTED DATE_TIME"])
+    else:
+        time_val = ""
 
     row = {"Kestrel Name": device, "Route Number": route, "Time": time_val}
     unit_row = {"Kestrel Name": "", "Route Number": "", "Time": ""}
